@@ -2,35 +2,63 @@ package edu.uta.teamargus.lynxblackjack;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.support.v7.app.ActionBarActivity;
-import android.support.v7.app.ActionBar;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
-import android.content.Context;
-import android.os.Build;
+import android.hardware.usb.UsbDeviceConnection;
+import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.text.InputType;
 import android.text.method.ScrollingMovementMethod;
-import android.view.Gravity;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
-import android.view.ViewGroup;
-import android.support.v4.widget.DrawerLayout;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
+
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+import edu.uta.teamargus.lynxblackjack.hoho.android.usbserial.driver.UsbSerialDriver;
+import edu.uta.teamargus.lynxblackjack.hoho.android.usbserial.driver.UsbSerialPort;
+import edu.uta.teamargus.lynxblackjack.hoho.android.usbserial.driver.UsbSerialProber;
+import edu.uta.teamargus.lynxblackjack.hoho.android.usbserial.util.HexDump;
+import edu.uta.teamargus.lynxblackjack.hoho.android.usbserial.util.SerialInputOutputManager;
 
 
 public class LynxApp extends Activity {
 
     private Button stay, hit, bet, splash;
     private TextView log;
+    private static UsbSerialPort sPort = null;
 
+    private final String TAG = LynxApp.class.getSimpleName();
+    private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
+
+    private SerialInputOutputManager mSerialIoManager;
+
+    private final SerialInputOutputManager.Listener mListener =
+            new SerialInputOutputManager.Listener() {
+
+                @Override
+                public void onRunError(Exception e) {
+                    Log.d(TAG, "Runner stopped.");
+                }
+
+                @Override
+                public void onNewData(final byte[] data) {
+                    LynxApp.this.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            LynxApp.this.updateReceivedData(data);
+                        }
+                    });
+                }
+            };
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -41,7 +69,32 @@ public class LynxApp extends Activity {
         splash = (Button) findViewById(R.id.splash_button);
         log = (TextView) findViewById(R.id.LogBox);
         log.setMovementMethod(new ScrollingMovementMethod());
-        listenForButton();
+        CardSet deck = new CardSet();
+
+
+        UsbManager manager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        List<UsbSerialDriver> availableDrivers = UsbSerialProber.getDefaultProber().findAllDrivers(manager);
+        if (availableDrivers.isEmpty()) {
+            return;
+        }
+
+// Open a connection to the first available driver.
+        UsbSerialDriver driver = availableDrivers.get(0);
+        UsbDeviceConnection connection = manager.openDevice(driver.getDevice());
+        if (connection == null) {
+            // You probably need to call UsbManager.requestPermission(driver.getDevice(), ..)
+            return;
+        }
+        List<UsbSerialPort> myPortList = driver.getPorts();
+        sPort = myPortList.get(0);
+        try {
+            sPort.open(connection);
+            sPort.setParameters(9600, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+            listenForButton(sPort);
+        }
+        catch(Exception e){
+            Log.d("CreateErr",e.toString());
+        }
     }
 
     @Override
@@ -63,7 +116,7 @@ public class LynxApp extends Activity {
         return super.onOptionsItemSelected(item);
     }
 
-    public void listenForButton() {
+    public void listenForButton(final UsbSerialPort nPort) {
         splash.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
                 // Do something in response to button click
@@ -130,6 +183,14 @@ public class LynxApp extends Activity {
 
             }
         });
+    }
+    private void updateReceivedData(byte[] data) {
+       /* final String message = "Read " + data.length + " bytes: \n"
+                + HexDump.dumpHexString(data) + "\n\n";*/
+        String rec = HexDump.dumpHexString(data);
+        rec=rec.substring(rec.lastIndexOf(' ') + 1);
+        //Log.d("Message",rec);
+       // tv1.setText(rec);
     }
 
 }
